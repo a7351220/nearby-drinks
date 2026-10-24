@@ -168,6 +168,7 @@ export default function DrinkPage() {
   const [radius, setRadius] = useState(1);
   const [menu, setMenu] = useState<MenuResponse | null>(null);
   const [temperature, setTemperature] = useState("any");
+  const [withToppings, setWithToppings] = useState(false);
   const [query, setQuery] = useState("");
   const [busy, setBusy] = useState<Task | null>(null);
   const [view, setView] = useState<View>("stores");
@@ -199,14 +200,14 @@ export default function DrinkPage() {
   useEffect(() => {
     const last = readCache<{
       latitude: string; longitude: string; locationLabel: string; selectedPreset: string | null;
-      radius: number; query: string; temperature: string; view: View;
+      radius: number; query: string; temperature: string; withToppings?: boolean; view: View;
       stores: StoreResponse | null; draw: RandomResponse | null; search: SearchResponse | null; menu: MenuResponse | null;
     }>("last", 30 * 60_000);
     if (last && typeof last.value?.latitude === "string" && typeof last.value.longitude === "string"
         && [1, 3, 5].includes(last.value.radius)) {
       const value = last.value;
       setLatitude(value.latitude); setLongitude(value.longitude); setLocationLabel(value.locationLabel);
-      setSelectedPreset(value.selectedPreset); setRadius(value.radius); setQuery(value.query); setTemperature(value.temperature);
+      setSelectedPreset(value.selectedPreset); setRadius(value.radius); setQuery(value.query); setTemperature(value.temperature); setWithToppings(value.withToppings === true);
       setView(value.view); setStores(value.stores); setDraw(value.draw); setSearch(value.search); setMenu(value.menu);
       setSavedAt(last.savedAt);
     }
@@ -215,10 +216,10 @@ export default function DrinkPage() {
 
   useEffect(() => {
     if (ready && hasLocation && !busy && (stores || draw || search || menu)) {
-      writeCache("last", { latitude, longitude, locationLabel, selectedPreset, radius, query, temperature,
+      writeCache("last", { latitude, longitude, locationLabel, selectedPreset, radius, query, temperature, withToppings,
         view, stores, draw, search, menu });
     }
-  }, [ready, hasLocation, busy, latitude, longitude, locationLabel, selectedPreset, radius, query, temperature, view, stores, draw, search, menu]);
+  }, [ready, hasLocation, busy, latitude, longitude, locationLabel, selectedPreset, radius, query, temperature, withToppings, view, stores, draw, search, menu]);
 
   useEffect(() => {
     if (!ready || !hasLocation) return;
@@ -335,6 +336,7 @@ export default function DrinkPage() {
         if (id === requestId.current) setMenu(result);
       } else if (task === "random") {
         if (temperature !== "any") params.set("temperature", temperature);
+        if (withToppings) params.set("toppings", "1");
         if (query.trim()) params.set("q", query.trim());
         const result = await requestApi<RandomResponse>(`/api/drinks/random?${params}`, activeController.signal);
         if (!result?.store?.name || !result?.item?.name) throw new Error("飲料資料不完整，請稍後再試。");
@@ -415,6 +417,8 @@ export default function DrinkPage() {
             <label className="drink-query">想喝什麼？<span className="drink-optional">可留白</span><input type="search" placeholder="例如：奶茶、烏龍、珍珠" value={query} maxLength={80} onChange={(event) => { clearDrinkResults(); setQuery(event.target.value); }} onKeyDown={(event) => { if (event.key === "Enter" && !event.nativeEvent.isComposing && !disabled) void run("search"); }} /></label>
           </div>
           <fieldset className="drink-radius"><legend>飲用溫度</legend><div className="drink-radius-options">{[["any", "都可以"], ["cold", "冰飲"], ["ambient", "常溫"], ["hot", "熱飲"]].map(([value, label]) => <label key={value} className={`drink-radius-option${temperature === value ? " is-selected" : ""}`}><input type="radio" name="temperature" value={value} checked={temperature === value} onChange={() => { clearDrinkResults(); setTemperature(value); }} /><span>{label}</span></label>)}</div></fieldset>
+          <label className="drink-toppings"><input type="checkbox" checked={withToppings} onChange={event => { clearDrinkResults(); setWithToppings(event.target.checked); }} />隨機加料</label>
+          <p className="drink-help">開啟後額外抽 1 項店家提供的可選加料，加價計入總價；沒有可選加料時保留原組合。</p>
           <p className="drink-help">溫度用於抽選；常溫只選店家明列的常溫選項，去冰仍屬冰飲。</p>
           <p className="drink-help">留白就從全部品項抽；填入關鍵字，只抽符合的飲料。</p>
           <div className="drink-main-actions">

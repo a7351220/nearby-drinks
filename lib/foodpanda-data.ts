@@ -159,8 +159,10 @@ export function optionTemperature(name: string): Temperature | undefined {
   // 去冰 / 無冰 is still a cold drink, never proof of room temperature.
   if (/冰|冷|ice|cold/iu.test(name)) return "cold";
 }
-const thermalGroup = (group: Group) => /冰|溫|熱|temperature|ice/iu.test(group.name)
-  || group.options.some(option => optionTemperature(option.name));
+const toppingGroup = (group: Group) => /加料|配料|加點|topping|add.?on/iu.test(group.name)
+  && !/甜度|糖度|冰量|溫度|尺寸|容量|杯型/iu.test(group.name);
+const thermalGroup = (group: Group) => !toppingGroup(group) && (/冰|溫|熱|temperature|ice/iu.test(group.name)
+  || group.options.some(option => optionTemperature(option.name)));
 
 export function compatibleVariation(value: Variation, mode: Temperature, itemName = ""): Variation | null {
   if (!randomizable(value)) return null;
@@ -179,7 +181,7 @@ export function compatibleVariation(value: Variation, mode: Temperature, itemNam
   return { ...value, groups };
 }
 
-export function drawVariation(value: Variation, chooseIndex: (length: number) => number, requested?: Temperature, itemName = "") {
+export function drawVariation(value: Variation, chooseIndex: (length: number) => number, requested?: Temperature, itemName = "", withToppings = false) {
   const modes = TEMPERATURES.filter(mode => (!requested || requested === mode) && compatibleVariation(value, mode, itemName));
   if (!modes.length) throw new Error("No compatible temperature choices");
   const temperature = modes[chooseIndex(modes.length)];
@@ -187,6 +189,10 @@ export function drawVariation(value: Variation, chooseIndex: (length: number) =>
   const selectedOptions = compatible.groups.filter(group => group.min === 1 && group.max === 1).map(group => ({
     groupId: group.id, groupName: group.name, ...group.options[chooseIndex(group.options.length)],
   }));
-  return { temperature, selectedOptions, totalPrice: Math.round((value.price + (value.containerPrice ?? 0)
+  const toppings = withToppings ? compatible.groups.filter(group => group.min === 0 && group.max >= 1 && toppingGroup(group))
+    .flatMap(group => group.options.filter(option => !/^(?:不加|不需要|不要|不選)|^(?:無|無加料|無配料|none|no toppings?)$|吸管|餐具|塑膠袋|紙袋|提袋|杯套|環保杯/iu.test(option.name))
+      .map(option => ({ groupId: group.id, groupName: group.name, ...option }))) : [];
+  if (toppings.length) selectedOptions.push(toppings[chooseIndex(toppings.length)]);
+  return { temperature, selectedOptions, toppingAdded: toppings.length > 0, totalPrice: Math.round((value.price + (value.containerPrice ?? 0)
     + selectedOptions.reduce((sum, option) => sum + option.price, 0)) * 100) / 100 };
 }

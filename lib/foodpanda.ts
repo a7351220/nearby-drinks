@@ -256,7 +256,7 @@ function randomIndex(length: number) {
   return value % length;
 }
 const pick = <T>(values: T[]): T => values[randomIndex(values.length)];
-export async function randomNearbyDrink(lat: number, lng: number, radiusKm: number, q = "", temperature?: Temperature) {
+export async function randomNearbyDrink(lat: number, lng: number, radiusKm: number, q = "", temperature?: Temperature, withToppings = false) {
   const needle = queryText(q), nearby = await getNearbyStores(lat, lng, radiusKm);
   if (!nearby.stores.length) throw new DrinkApiError("這個範圍內沒有平台回傳的飲料店，請試較遠的距離。", 404, nearby.warnings);
   const remaining = [...nearby.stores], warnings = [...nearby.warnings];
@@ -280,7 +280,8 @@ export async function randomNearbyDrink(lat: number, lng: number, radiusKm: numb
     }
     const item = details.data, variations = item.variations.filter(value => TEMPERATURES.some(mode => (!temperature || temperature === mode) && compatibleVariation(value, mode, item.name)));
     if (!variations.length) { warnings.push(`${store.name} 的抽中品項沒有可完整處理的必選項，已略過。`); continue; }
-    const variation = pick(variations), { selectedOptions, totalPrice, temperature: selectedTemperature } = drawVariation(variation, randomIndex, temperature, item.name);
+    const variation = pick(variations), { selectedOptions, totalPrice, temperature: selectedTemperature, toppingAdded } = drawVariation(variation, randomIndex, temperature, item.name, withToppings);
+    if (withToppings && !toppingAdded) warnings.push("這杯沒有可隨機加入的額外加料，保留原本飲料組合。");
     const hasSugar = selectedOptions.some(option => /糖|甜|蜜|sugar|sweet/iu.test(option.groupName));
     const hasIce = selectedOptions.some(option => /冰|溫|熱|ice|temperature/iu.test(option.groupName));
     if (!hasSugar && !item.fixedCustomization.sugar) warnings.push("甜度選項未提供，請依店家規定。");

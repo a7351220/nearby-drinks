@@ -150,3 +150,6 @@ body { -webkit-font-smoothing: antialiased; }
 .drink-option-tag { background: white; border: 1px solid #d8e2da; border-radius: 6px; padding: 4px 8px; font-size: 13px; overflow-wrap: anywhere; }
 .drink-menu-options { margin-top: 10px; }
 .drink-menu-options summary { cursor: pointer; color: var(--drink-green); padding: 8px 0; }
+
+.drink-toppings { display: flex; align-items: center; gap: 8px; margin-top: 16px; cursor: pointer; font-weight: 600; }
+.drink-toppings input { width: 18px; height: 18px; accent-color: var(--drink-green); }
