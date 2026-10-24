@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   asList, asNumber, asText, toStore, normalizeGraphqlMenu, normalizeProductDetail,
-  compatibleVariation, TEMPERATURES, drawVariation, type Temperature, type Drink, type Store,
+  drawableTemperatures, drawVariation, type Temperature, type Drink, type Store,
 } from "./foodpanda-data";
 export type { Option, Group, Variation, Drink, Store } from "./foodpanda-data";
 
@@ -24,7 +24,7 @@ const PRODUCT_QUERY_HASH = "22f7602de58c2f275e637f368379c9cddca7c80a3e921d1e06e4
 const MENU_QUERY_HASH = "2f099c32bbbb7df71dfe835ac6023583b968d3d86be315de4cdc7fd659de1b28";
 // Keep normalized data only, never raw vendor/product payloads or session fields.
 const cache = new Map<string, { expires: number; value: Payload }>();
-type RequestState = { inFlight: Map<string, Promise<Payload>>; queue: Promise<void>; lastStart: number; origin?: string };
+type RequestState = { inFlight: Map<string, Promise<Payload>>; queue: Promise<void>; lastStart: number; origin?: string; deadline?: number };
 const requestState = new AsyncLocalStorage<RequestState>();
 export function runWithDrinkRequest<T>(run: () => T, origin?: string): T {
   return requestState.run({ inFlight: new Map(), queue: Promise.resolve(), lastStart: 0, origin }, run);
@@ -94,7 +94,9 @@ async function readSource<T>(url: string, stage: Stage, ttl: number, parse: (bod
     if (blocked && Date.now() < blocked.until) throw upstreamRejection(blocked.status);
     await pause(Math.max(0, 500 - (Date.now() - state.lastStart)));
     state.lastStart = Date.now();
-    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), 15000);
+    const remainingMs = state.deadline ? state.deadline - Date.now() : 15000;
+    if (remainingMs <= 0) throw new DrinkApiError("本次查詢達到時間上限，請再抽一次或調整條件。", 504);
+    const controller = new AbortController(), timeout = setTimeout(() => controller.abort(), Math.min(15000, remainingMs));
     try {
       const response = await fetch(url, { method: options.body ? "POST" : "GET", body: options.body,
         signal: controller.signal, headers: { Accept: "application/json",
@@ -257,6 +259,8 @@ function randomIndex(length: number) {
 }
 const pick = <T>(values: T[]): T => values[randomIndex(values.length)];
 export async function randomNearbyDrink(lat: number, lng: number, radiusKm: number, q = "", temperature?: Temperature, withToppings = false) {
+  const state = requestState.getStore();
+  if (withToppings && state) state.deadline = Date.now() + 20000;
   const needle = queryText(q), nearby = await getNearbyStores(lat, lng, radiusKm);
   if (!nearby.stores.length) throw new DrinkApiError("這個範圍內沒有平台回傳的飲料店，請試較遠的距離。", 404, nearby.warnings);
   const remaining = [...nearby.stores], warnings = [...nearby.warnings];
@@ -272,27 +276,29 @@ export async function randomNearbyDrink(lat: number, lng: number, radiusKm: numb
     if (menu.store.distanceKm! > radiusKm) { warnings.push(`${store.name} 的菜單座標超出範圍，已略過。`); continue; }
     const candidates = menu.items.filter(item => matches(item, needle));
     if (!candidates.length) continue;
-    let details: Payload<Drink>;
-    try { details = await getDrinkDetails(store, pick(candidates), lat, lng); }
-    catch (error) {
-      if (error instanceof DrinkApiError && (error.status === 503 || error.code === "UPSTREAM_QUERY_FAILED")) throw error;
-      warnings.push(`${store.name} 的抽中品項暫時缺少完整糖冰選項，已略過。`); continue;
+    for (let itemAttempt = 0; itemAttempt < (withToppings ? 3 : 1) && candidates.length; itemAttempt++) {
+      let details: Payload<Drink>;
+      try { details = await getDrinkDetails(store, candidates.splice(randomIndex(candidates.length), 1)[0], lat, lng); }
+      catch (error) {
+        if (error instanceof DrinkApiError && (error.status === 503 || error.code === "UPSTREAM_QUERY_FAILED")) throw error;
+        warnings.push(`${store.name} 的抽中品項暫時缺少完整糖冰選項，已略過。`); continue;
+      }
+      const item = details.data, variations = item.variations.filter(value => drawableTemperatures(value, temperature, item.name, withToppings).length > 0);
+      if (!variations.length) { warnings.push(`${store.name} 的抽中品項沒有符合糖冰與加料條件的規格，已略過。`); continue; }
+      const variation = pick(variations), { selectedOptions, totalPrice, temperature: selectedTemperature, toppingAdded } = drawVariation(variation, randomIndex, temperature, item.name, withToppings);
+      if (withToppings && !toppingAdded) continue;
+      const hasSugar = selectedOptions.some(option => /糖|甜|蜜|sugar|sweet/iu.test(option.groupName));
+      const hasIce = selectedOptions.some(option => /冰|溫|熱|ice|temperature/iu.test(option.groupName));
+      if (!hasSugar && !item.fixedCustomization.sugar) warnings.push("甜度選項未提供，請依店家規定。");
+      if (!hasIce && !item.fixedCustomization.ice) warnings.push("冰量選項未提供，請依店家規定。");
+      if (item.customizationHint) warnings.push(item.customizationHint);
+      if ((variation.containerPrice ?? 0) > 0) warnings.push(`價格已包含平台列出的容器費 ${variation.containerPrice} 元。`);
+      return { store: menu.store, item, variation, selectedOptions, totalPrice, temperature: selectedTemperature,
+        sourceUpdatedAt: oldest(oldest(nearby.sourceUpdatedAt, menu.sourceUpdatedAt), details.sourceUpdatedAt),
+        warnings: unique(warnings), source: SOURCE };
     }
-    const item = details.data, variations = item.variations.filter(value => TEMPERATURES.some(mode => (!temperature || temperature === mode) && compatibleVariation(value, mode, item.name)));
-    if (!variations.length) { warnings.push(`${store.name} 的抽中品項沒有可完整處理的必選項，已略過。`); continue; }
-    const variation = pick(variations), { selectedOptions, totalPrice, temperature: selectedTemperature, toppingAdded } = drawVariation(variation, randomIndex, temperature, item.name, withToppings);
-    if (withToppings && !toppingAdded) warnings.push("這杯沒有可隨機加入的額外加料，保留原本飲料組合。");
-    const hasSugar = selectedOptions.some(option => /糖|甜|蜜|sugar|sweet/iu.test(option.groupName));
-    const hasIce = selectedOptions.some(option => /冰|溫|熱|ice|temperature/iu.test(option.groupName));
-    if (!hasSugar && !item.fixedCustomization.sugar) warnings.push("甜度選項未提供，請依店家規定。");
-    if (!hasIce && !item.fixedCustomization.ice) warnings.push("冰量選項未提供，請依店家規定。");
-    if (item.customizationHint) warnings.push(item.customizationHint);
-    if ((variation.containerPrice ?? 0) > 0) warnings.push(`價格已包含平台列出的容器費 ${variation.containerPrice} 元。`);
-    return { store: menu.store, item, variation, selectedOptions, totalPrice, temperature: selectedTemperature,
-      sourceUpdatedAt: oldest(oldest(nearby.sourceUpdatedAt, menu.sourceUpdatedAt), details.sourceUpdatedAt),
-      warnings: unique(warnings), source: SOURCE };
   }
-  throw new DrinkApiError("本次抽查未找到選項完整的符合飲料，可先搜尋或再抽一次。", 422, unique(warnings));
+  throw new DrinkApiError(withToppings ? "本次抽查未找到符合條件且可額外加料的飲料，請再抽一次、放大範圍或調整條件。" : "本次抽查未找到選項完整的符合飲料，可先搜尋或再抽一次。", 422, unique(warnings));
 }
 
 export async function getNearbyStoreMenu(lat: number, lng: number, radiusKm: number, code: string) {

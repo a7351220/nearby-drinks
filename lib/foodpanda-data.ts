@@ -181,17 +181,27 @@ export function compatibleVariation(value: Variation, mode: Temperature, itemNam
   return { ...value, groups };
 }
 
+export function toppingOptions(value: Variation) {
+  return value.groups.filter(group => group.min === 0 && group.max >= 1 && toppingGroup(group))
+    .flatMap(group => group.options.filter(option => !/^(?:不加|不需要|不要|不選)|^(?:無|無加料|無配料|none|no toppings?)$|吸管|餐具|塑膠袋|紙袋|提袋|杯套|環保杯/iu.test(option.name))
+      .map(option => ({ groupId: group.id, groupName: group.name, ...option })));
+}
+export function drawableTemperatures(value: Variation, requested?: Temperature, itemName = "", withToppings = false) {
+  return TEMPERATURES.filter(mode => {
+    const compatible = (!requested || requested === mode) && compatibleVariation(value, mode, itemName);
+    return compatible && (!withToppings || toppingOptions(compatible).length > 0);
+  });
+}
+
 export function drawVariation(value: Variation, chooseIndex: (length: number) => number, requested?: Temperature, itemName = "", withToppings = false) {
-  const modes = TEMPERATURES.filter(mode => (!requested || requested === mode) && compatibleVariation(value, mode, itemName));
+  const modes = drawableTemperatures(value, requested, itemName, withToppings);
   if (!modes.length) throw new Error("No compatible temperature choices");
   const temperature = modes[chooseIndex(modes.length)];
   const compatible = compatibleVariation(value, temperature, itemName)!;
   const selectedOptions = compatible.groups.filter(group => group.min === 1 && group.max === 1).map(group => ({
     groupId: group.id, groupName: group.name, ...group.options[chooseIndex(group.options.length)],
   }));
-  const toppings = withToppings ? compatible.groups.filter(group => group.min === 0 && group.max >= 1 && toppingGroup(group))
-    .flatMap(group => group.options.filter(option => !/^(?:不加|不需要|不要|不選)|^(?:無|無加料|無配料|none|no toppings?)$|吸管|餐具|塑膠袋|紙袋|提袋|杯套|環保杯/iu.test(option.name))
-      .map(option => ({ groupId: group.id, groupName: group.name, ...option }))) : [];
+  const toppings = withToppings ? toppingOptions(compatible) : [];
   if (toppings.length) selectedOptions.push(toppings[chooseIndex(toppings.length)]);
   return { temperature, selectedOptions, toppingAdded: toppings.length > 0, totalPrice: Math.round((value.price + (value.containerPrice ?? 0)
     + selectedOptions.reduce((sum, option) => sum + option.price, 0)) * 100) / 100 };

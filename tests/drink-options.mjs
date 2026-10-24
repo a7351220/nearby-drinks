@@ -44,14 +44,13 @@ assert.equal(extra.selectedOptions.at(-1).name, '冰淇淋');
 assert.equal(extra.totalPrice, 81);
 assert.equal(extra.selectedOptions.filter(x => x.groupId === 't').length, 1);
 assert(compatibleVariation(topped, 'hot'), 'toppings containing 冰 must not become temperature controls');
-for (const max of [0, 1, 3]) {
+for (const max of [1, 3]) {
   const result = drawVariation({ ...variation, groups: [...variation.groups, { ...toppings, max }] }, () => 0, 'cold', '', true);
   assert.equal(result.selectedOptions.filter(x => x.groupId === 't').length, max ? 1 : 0);
 }
-const noExtras = drawVariation({ ...variation, groups: [...variation.groups, { ...toppings, options: toppings.options.slice(2) }] }, last, 'hot', '', true);
-assert.equal(noExtras.toppingAdded, false);
-assert.equal(noExtras.totalPrice, 61);
-const required = drawVariation({ ...variation, groups: [...variation.groups, { ...toppings, min: 1, max: 1, options: toppings.options.slice(0, 1) }] }, last, 'hot', '', true);
+assert.throws(() => drawVariation({ ...variation, groups: [...variation.groups, { ...toppings, options: toppings.options.slice(2) }] }, last, 'hot', '', true));
+assert.throws(() => drawVariation({ ...variation, groups: [...variation.groups, { ...toppings, max: 0 }] }, last, 'hot', '', true));
+const required = drawVariation({ ...variation, groups: [...variation.groups, { ...toppings, min: 1, max: 1, options: toppings.options.slice(0, 1) }] }, last, 'hot');
 assert.equal(required.selectedOptions.filter(x => x.groupId === 't').length, 1);
 assert.equal(required.totalPrice, 71);
 console.log('PASS: temperatures, pricing, branch identity and optional topping limits / exclusion / totals');

@@ -418,7 +418,7 @@ export default function DrinkPage() {
           </div>
           <fieldset className="drink-radius"><legend>飲用溫度</legend><div className="drink-radius-options">{[["any", "都可以"], ["cold", "冰飲"], ["ambient", "常溫"], ["hot", "熱飲"]].map(([value, label]) => <label key={value} className={`drink-radius-option${temperature === value ? " is-selected" : ""}`}><input type="radio" name="temperature" value={value} checked={temperature === value} onChange={() => { clearDrinkResults(); setTemperature(value); }} /><span>{label}</span></label>)}</div></fieldset>
           <label className="drink-toppings"><input type="checkbox" checked={withToppings} onChange={event => { clearDrinkResults(); setWithToppings(event.target.checked); }} />隨機加料</label>
-          <p className="drink-help">開啟後額外抽 1 項店家提供的可選加料，加價計入總價；沒有可選加料時保留原組合。</p>
+          <p className="drink-help">開啟後只抽能額外加料的飲料，隨機加 1 項並計入總價；未找到時會提示重試。</p>
           <p className="drink-help">溫度用於抽選；常溫只選店家明列的常溫選項，去冰仍屬冰飲。</p>
           <p className="drink-help">留白就從全部品項抽；填入關鍵字，只抽符合的飲料。</p>
           <div className="drink-main-actions">
